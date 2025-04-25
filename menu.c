@@ -312,25 +312,30 @@ int scrolling(Background *b, int dx, int dy) {
     int effective_width = b->background->w;
     int effective_height = b->background->h;
 
-    // Constrain camera within background bounds
+    // Constrain camera horizontally
     if (b->camera_pos.x < 0) {
         b->camera_pos.x = 0;
     } else if (b->camera_pos.x + b->camera_pos.w > effective_width) {
         b->camera_pos.x = effective_width - b->camera_pos.w;
-        // Only set hit_boundary if moving right and background is wider than screen
         if (dx > 0 && effective_width > SCREEN_WIDTH) {
             hit_boundary = 1;
         }
     }
 
-    if (b->camera_pos.y < 0) {
-        b->camera_pos.y = 0;
-    } else if (b->camera_pos.y + b->camera_pos.h > effective_height) {
-        b->camera_pos.y = effective_height - b->camera_pos.h;
+    // Constrain camera vertically
+    if (effective_height > b->camera_pos.h) {
+        if (b->camera_pos.y < 0) {
+            b->camera_pos.y = 0;
+        } else if (b->camera_pos.y + b->camera_pos.h > effective_height) {
+            b->camera_pos.y = effective_height - b->camera_pos.h;
+        }
+    } else {
+        b->camera_pos.y = 0; // Center if background is smaller than camera
     }
 
-    printf("scrolling: dx=%d, dy=%d, camera_pos=(%d,%d), effective_size=(%d,%d), hit_boundary=%d\n",
-           dx, dy, b->camera_pos.x, b->camera_pos.y, effective_width, effective_height, hit_boundary);
+    printf("scrolling: dx=%d, dy=%d, camera_pos=(%d,%d,%d,%d), effective_size=(%d,%d), hit_boundary=%d\n",
+           dx, dy, b->camera_pos.x, b->camera_pos.y, b->camera_pos.w, b->camera_pos.h,
+           effective_width, effective_height, hit_boundary);
     return hit_boundary;
 }
 
@@ -439,38 +444,73 @@ void renderPlayerStats(SDL_Surface *screen, Player *p, TTF_Font *font, SDL_Color
 void renderBackground(SDL_Surface *screen, Player *p, Obstacle obstacles[], int num_obstacles, TTF_Font *font, SDL_Color color, Uint32 startTime, int split_screen, int player_num) {
     if (!p->bg.background) {
         printf("renderBackground: NULL background for player %d\n", player_num);
-        SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 0, 0));
+        SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 0, 0)); // Red screen for error
         return;
     }
-    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
+
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0)); // Clear screen to black
     SDL_Rect dest = {0, 0, 1920, split_screen ? 540 : 1080};
     SDL_BlitSurface(p->bg.background, &p->bg.camera_pos, screen, &dest);
+
+    // Render obstacles
     renderObstacles(screen, obstacles, num_obstacles, &p->bg.camera_pos);
+
+    // Render player stats and time
     render_time(screen, font, color, startTime, player_num);
     renderPlayerStats(screen, p, font, color, player_num);
+
+    printf("renderBackground: Player %d, camera_pos=(%d,%d,%d,%d), dest=(%d,%d,%d,%d)\n",
+           player_num, p->bg.camera_pos.x, p->bg.camera_pos.y, p->bg.camera_pos.w, p->bg.camera_pos.h,
+           dest.x, dest.y, dest.w, dest.h);
 }
 
 void splitScreen(SDL_Surface *screen, Player *player1, Player *player2, Obstacle obstacles[], int num_obstacles, TTF_Font *font, SDL_Color color, Uint32 startTime) {
     if (!player1->bg.background || !player2->bg.background) {
         printf("splitScreen: NULL background(s) - player1=%p, player2=%p\n",
                player1->bg.background, player2->bg.background);
-        SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 0, 0));
+        SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 0, 0)); // Red screen for error
         return;
     }
+
     SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
+
+    // Define split-screen regions
     SDL_Rect top = {0, 0, 1920, 540};
     SDL_Rect bottom = {0, 540, 1920, 540};
+
+    // Blit player 1's background (top half)
     SDL_BlitSurface(player1->bg.background, &player1->bg.camera_pos, screen, &top);
+    // Blit player 2's background (bottom half)
     SDL_BlitSurface(player2->bg.background, &player2->bg.camera_pos, screen, &bottom);
-    renderObstacles(screen, obstacles, num_obstacles, &player1->bg.camera_pos);
-    renderObstacles(screen, obstacles, num_obstacles, &player2->bg.camera_pos);
+
+    // Render obstacles relative to each player's camera
+    for (int i = 0; i < num_obstacles; i++) {
+        if (obstacles[i].active && obstacles[i].image) {
+            SDL_Rect dest1 = obstacles[i].position;
+            dest1.x -= player1->bg.camera_pos.x;
+            dest1.y -= player1->bg.camera_pos.y;
+            SDL_BlitSurface(obstacles[i].image, NULL, screen, &dest1);
+
+            SDL_Rect dest2 = obstacles[i].position;
+            dest2.x -= player2->bg.camera_pos.x;
+            dest2.y -= player2->bg.camera_pos.y;
+            dest2.y += 540; // Offset for bottom half
+            SDL_BlitSurface(obstacles[i].image, NULL, screen, &dest2);
+        }
+    }
+
+    // Draw separator line
     SDL_Rect border = {0, 539, 1920, 2};
     Uint32 line_color = SDL_MapRGB(screen->format, 255, 255, 255);
     SDL_FillRect(screen, &border, line_color);
+
+    // Render stats and time
     render_time(screen, font, color, startTime, 1);
     render_time(screen, font, color, startTime, 2);
     renderPlayerStats(screen, player1, font, color, 1);
     renderPlayerStats(screen, player2, font, color, 2);
+
+    printf("splitScreen: Rendered top=%dx%d, bottom=%dx%d\n", top.w, top.h, bottom.w, bottom.h);
 }
 
 void display_guide(SDL_Surface *screen, TTF_Font *font) {
