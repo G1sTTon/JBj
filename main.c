@@ -269,39 +269,33 @@ int main() {
                             running = 0;
                             break;
                         case SDLK_o:
-                            split_screen = !split_screen;
-                            if (split_screen) {
-                                if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
-                                if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
-                                if (!initBackground(&player1.bg, game_backgrounds[current_game_background1], 1)) {
-                                    printf("Failed to init split-screen background for player 1: %s, using fallback\n",
-                                           game_backgrounds[current_game_background1]);
-                                    initBackground(&player1.bg, "image/m2.png", 1);
-                                }
-                                if (!initBackground(&player2.bg, game_backgrounds[current_game_background2], 1)) {
-                                    printf("Failed to init split-screen background for player 2: %s, using fallback\n",
-                                           game_backgrounds[current_game_background2]);
-                                    initBackground(&player2.bg, "image/m2.png", 1);
-                                }
-                                printf("Split-screen enabled (top-bottom)\n");
-                            } else {
-                                if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
-                                if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
-                                if (!initBackground(&player1.bg, game_backgrounds[current_game_background1], 0)) {
-                                    printf("Failed to init single-screen background for player 1: %s, using fallback\n",
-                                           game_backgrounds[current_game_background1]);
-                                    initBackground(&player1.bg, "image/m2.png", 0);
-                                }
-                                if (!initBackground(&player2.bg, game_backgrounds[current_game_background2], 0)) {
-                                    printf("Failed to init single-screen background for player 2: %s, using fallback\n",
-                                           game_backgrounds[current_game_background2]);
-                                    initBackground(&player2.bg, "image/m2.png", 0);
-                                }
-                                printf("Split-screen disabled\n");
-                            }
-                            player1.bounding_box.y = split_screen ? 100 : 400;
-                            player2.bounding_box.y = split_screen ? 640 : 400;
-                            break;
+    split_screen = !split_screen;
+    printf("Toggling split-screen: %d\n", split_screen);
+    if (player1.bg.background) {
+        printf("Freeing player 1 background\n");
+        SDL_FreeSurface(player1.bg.background);
+        player1.bg.background = NULL;
+    }
+    if (player2.bg.background) {
+        printf("Freeing player 2 background\n");
+        SDL_FreeSurface(player2.bg.background);
+        player2.bg.background = NULL;
+    }
+    const char *bg1 = game_backgrounds[current_game_background1];
+    const char *bg2 = game_backgrounds[current_game_background2];
+    if (!initBackground(&player1.bg, bg1, split_screen)) {
+        printf("Failed to init split-screen background for player 1: %s\n", bg1);
+        initBackground(&player1.bg, "image/m2.png", split_screen);
+    }
+    if (!initBackground(&player2.bg, bg2, split_screen)) {
+        printf("Failed to init split-screen background for player 2: %s\n", bg2);
+        initBackground(&player2.bg, "image/m2.png", split_screen);
+    }
+    player1.bounding_box.y = split_screen ? 100 : 400;
+    player2.bounding_box.y = split_screen ? 640 : 400;
+    printf("Split-screen set to %d, player1.y=%d, player2.y=%d\n",
+           split_screen, player1.bounding_box.y, player2.bounding_box.y);
+    break;
                         case SDLK_TAB:
                             if (!split_screen) {
                                 active_player = (active_player == 1) ? 2 : 1;
