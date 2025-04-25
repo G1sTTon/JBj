@@ -472,76 +472,64 @@ void renderPlayerStats(SDL_Surface *screen, Player *p, TTF_Font *font, SDL_Color
     }
 }
 
-void renderBackground(SDL_Surface *screen, Player *p, Obstacle obstacles[], int num_obstacles, TTF_Font *font, SDL_Color color, Uint32 startTime, int split_screen, int player_num) {
-    if (!p->bg.background) {
-        printf("renderBackground: NULL background for player %d\n", player_num);
-        SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 0, 0)); // Red screen for error
-        return;
-    }
+void renderBackground(SDL_Surface *screen, Player *p, Obstacle obstacles[], int num_obstacles, TTF_Font *font, SDL_Color color, Uint32 startTime, int split_screen, int player_num, Uint32 frame_time, int fps) { if (!p->bg.background) { printf("renderBackground: NULL background for player %d\n", player_num); SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 0, 0)); return; }
 
-    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0)); // Clear screen to black
-    SDL_Rect dest = {0, 0, 1920, split_screen ? 540 : 1080};
-    SDL_BlitSurface(p->bg.background, &p->bg.camera_pos, screen, &dest);
+SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
+SDL_Rect dest = {0, 0, 1920, split_screen ? 540 : 1080};
+SDL_BlitSurface(p->bg.background, &p->bg.camera_pos, screen, &dest);
 
-    // Render obstacles
-    renderObstacles(screen, obstacles, num_obstacles, &p->bg.camera_pos);
+renderObstacles(screen, obstacles, num_obstacles, &p->bg.camera_pos);
+render_time(screen, font, color, startTime, player_num);
+renderPlayerStats(screen, p, font, color, player_num);
+renderMinimap(screen, &p->bg, player_num, split_screen);
+renderPerformanceStats(screen, font, color, player_num, split_screen, frame_time, fps);
 
-    // Render player stats and time
-    render_time(screen, font, color, startTime, player_num);
-    renderPlayerStats(screen, p, font, color, player_num);
+printf("renderBackground: Player %d, camera_pos=(%d,%d,%d,%d), dest=(%d,%d,%d,%d)\n",
+       player_num, p->bg.camera_pos.x, p->bg.camera_pos.y, p->bg.camera_pos.w, p->bg.camera_pos.h,
+       dest.x, dest.y, dest.w, dest.h);
 
-    printf("renderBackground: Player %d, camera_pos=(%d,%d,%d,%d), dest=(%d,%d,%d,%d)\n",
-           player_num, p->bg.camera_pos.x, p->bg.camera_pos.y, p->bg.camera_pos.w, p->bg.camera_pos.h,
-           dest.x, dest.y, dest.w, dest.h);
 }
 
-void splitScreen(SDL_Surface *screen, Player *player1, Player *player2, Obstacle obstacles[], int num_obstacles, TTF_Font *font, SDL_Color color, Uint32 startTime) {
-    if (!player1->bg.background || !player2->bg.background) {
-        printf("splitScreen: NULL background(s) - player1=%p, player2=%p\n",
-               player1->bg.background, player2->bg.background);
-        SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 0, 0)); // Red screen for error
-        return;
+void splitScreen(SDL_Surface *screen, Player *player1, Player *player2, Obstacle obstacles[], int num_obstacles, TTF_Font *font, SDL_Color color, Uint32 startTime, Uint32 frame_time, int fps) { if (!player1->bg.background || !player2->bg.background) { printf("splitScreen: NULL background(s) - player1=%p, player2=%p\n", player1->bg.background, player2->bg.background); SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 255, 0, 0)); return; }
+
+SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
+
+SDL_Rect top = {0, 0, 1920, 540};
+SDL_Rect bottom = {0, 540, 1920, 540};
+
+SDL_BlitSurface(player1->bg.background, &player1->bg.camera_pos, screen, &top);
+SDL_BlitSurface(player2->bg.background, &player2->bg.camera_pos, screen, &bottom);
+
+for (int i = 0; i < num_obstacles; i++) {
+    if (obstacles[i].active && obstacles[i].image) {
+        SDL_Rect dest1 = obstacles[i].position;
+        dest1.x -= player1->bg.camera_pos.x;
+        dest1.y -= player1->bg.camera_pos.y;
+        SDL_BlitSurface(obstacles[i].image, NULL, screen, &dest1);
+
+        SDL_Rect dest2 = obstacles[i].position;
+        dest2.x -= player2->bg.camera_pos.x;
+        dest2.y -= player2->bg.camera_pos.y;
+        dest2.y += 540;
+        SDL_BlitSurface(obstacles[i].image, NULL, screen, &dest2);
     }
+}
 
-    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
+SDL_Rect border = {0, 539, 1920, 2};
+Uint32 line_color = SDL_MapRGB(screen->format, 255, 255, 255);
+SDL_FillRect(screen, &border, line_color);
 
-    // Define split-screen regions
-    SDL_Rect top = {0, 0, 1920, 540};
-    SDL_Rect bottom = {0, 540, 1920, 540};
+render_time(screen, font, color, startTime, 1);
+render_time(screen, font, color, startTime, 2);
+renderPlayerStats(screen, player1, font, color, 1);
+renderPlayerStats(screen, player2, font, color, 2);
+renderMinimap(screen, &player1->bg, 1, 1);
+renderMinimap(screen, &player2->bg, 2, 1);
+renderPerformanceStats(screen, font, color, 1, 1, frame_time, fps);
+renderPerformanceStats(screen, font, color, 2, 1, frame_time, fps);
 
-    // Blit player 1's background (top half)
-    SDL_BlitSurface(player1->bg.background, &player1->bg.camera_pos, screen, &top);
-    // Blit player 2's background (bottom half)
-    SDL_BlitSurface(player2->bg.background, &player2->bg.camera_pos, screen, &bottom);
+printf("splitScreen: Rendered top=%dx%d, bottom=%dx%d\n", top.w, top.h, bottom.w, bottom.h);
 
-    // Render obstacles relative to each player's camera
-    for (int i = 0; i < num_obstacles; i++) {
-        if (obstacles[i].active && obstacles[i].image) {
-            SDL_Rect dest1 = obstacles[i].position;
-            dest1.x -= player1->bg.camera_pos.x;
-            dest1.y -= player1->bg.camera_pos.y;
-            SDL_BlitSurface(obstacles[i].image, NULL, screen, &dest1);
-
-            SDL_Rect dest2 = obstacles[i].position;
-            dest2.x -= player2->bg.camera_pos.x;
-            dest2.y -= player2->bg.camera_pos.y;
-            dest2.y += 540; // Offset for bottom half
-            SDL_BlitSurface(obstacles[i].image, NULL, screen, &dest2);
-        }
-    }
-
-    // Draw separator line
-    SDL_Rect border = {0, 539, 1920, 2};
-    Uint32 line_color = SDL_MapRGB(screen->format, 255, 255, 255);
-    SDL_FillRect(screen, &border, line_color);
-
-    // Render stats and time
-    render_time(screen, font, color, startTime, 1);
-    render_time(screen, font, color, startTime, 2);
-    renderPlayerStats(screen, player1, font, color, 1);
-    renderPlayerStats(screen, player2, font, color, 2);
-
-    printf("splitScreen: Rendered top=%dx%d, bottom=%dx%d\n", top.w, top.h, bottom.w, bottom.h);
 }
 
 void display_guide(SDL_Surface *screen, TTF_Font *font) {
@@ -642,4 +630,105 @@ void display_successive_backgrounds(SDL_Surface *screen) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {}
     printf("display_successive_backgrounds: Completed\n");
+}
+
+void renderMinimap(SDL_Surface *screen, Background *bg, int player_num, int split_screen) { if (!bg->background) { printf("renderMinimap: NULL background for player %d\n", player_num); return; }
+
+// Minimap dimensions and position
+const int minimap_width = 200;
+const int minimap_height = 100;
+const int minimap_x = SCREEN_WIDTH - minimap_width - 10; // Top-right corner
+const int minimap_y = (player_num == 1 || !split_screen) ? 10 : SCREEN_HEIGHT / 2 + 10;
+
+// Background dimensions
+int bg_width = bg->background->w;
+int bg_height = bg->background->h;
+
+// Calculate scaled background size to fit within minimap
+float aspect_ratio = (float)bg_width / bg_height;
+int scaled_bg_width, scaled_bg_height;
+if (aspect_ratio > (float)minimap_width / minimap_height) {
+    scaled_bg_width = minimap_width;
+    scaled_bg_height = (int)(minimap_width / aspect_ratio);
+} else {
+    scaled_bg_height = minimap_height;
+    scaled_bg_width = (int)(minimap_height * aspect_ratio);
+}
+
+// Center the background in the minimap
+SDL_Rect bg_rect = {
+    minimap_x + (minimap_width - scaled_bg_width) / 2,
+    minimap_y + (minimap_height - scaled_bg_height) / 2,
+    scaled_bg_width,
+    scaled_bg_height
+};
+
+// Scale the background image
+SDL_Surface *scaled_bg = scaleSurface(bg->background, scaled_bg_width, scaled_bg_height);
+if (!scaled_bg) {
+    printf("renderMinimap: Failed to scale background for player %d\n", player_num);
+    // Fallback to blue rectangle
+    SDL_FillRect(screen, &bg_rect, SDL_MapRGB(screen->format, 0, 0, 255));
+}
+
+// Calculate camera rectangle (smaller size)
+float scale_x = (float)scaled_bg_width / bg_width;
+float scale_y = (float)scaled_bg_height / bg_height;
+const int camera_size = 10; // Smaller fixed size for camera "ping"
+SDL_Rect camera_rect = {
+    bg_rect.x + (int)(bg->camera_pos.x * scale_x) + (scaled_bg_width - camera_size) / 2,
+    bg_rect.y + (int)(bg->camera_pos.y * scale_y) + (scaled_bg_height - camera_size) / 2,
+    camera_size,
+    camera_size
+};
+
+// Draw minimap background (border)
+SDL_Rect minimap_border = {minimap_x - 2, minimap_y - 2, minimap_width + 4, minimap_height + 4};
+SDL_FillRect(screen, &minimap_border, SDL_MapRGB(screen->format, 255, 255, 255));
+
+// Draw minimap area (black background)
+SDL_Rect minimap_area = {minimap_x, minimap_y, minimap_width, minimap_height};
+SDL_FillRect(screen, &minimap_area, SDL_MapRGB(screen->format, 0, 0, 0));
+
+// Draw scaled background image
+if (scaled_bg) {
+    SDL_BlitSurface(scaled_bg, NULL, screen, &bg_rect);
+    SDL_FreeSurface(scaled_bg);
+}
+
+// Draw camera rectangle (red ping)
+SDL_FillRect(screen, &camera_rect, SDL_MapRGB(screen->format, 255, 0, 0));
+
+printf("renderMinimap: Player %d, minimap at (%d,%d,%d,%d), bg_rect=(%d,%d,%d,%d), camera_rect=(%d,%d,%d,%d)\n",
+       player_num, minimap_x, minimap_y, minimap_width, minimap_height,
+       bg_rect.x, bg_rect.y, bg_rect.w, bg_rect.h,
+       camera_rect.x, camera_rect.y, camera_rect.w, camera_rect.h);
+
+}
+void renderPerformanceStats(SDL_Surface *screen, TTF_Font *font, SDL_Color color, int player_num, int split_screen, Uint32 frame_time, int fps) { if (!font) { printf("renderPerformanceStats: NULL font for player %d\n", player_num); return; }
+
+// Position below minimap
+int stats_x = SCREEN_WIDTH - 200 - 10; // Same x as minimap
+int stats_y = (player_num == 1 || !split_screen) ? 120 : SCREEN_HEIGHT / 2 + 120; // Below minimap (100 height + 10 offset)
+
+// Approximate CPU usage: frame_time / target_frame_time (16ms for 60 FPS)
+float target_frame_time = 16.0f; // ms
+int cpu_usage = (int)((frame_time / target_frame_time) * 100);
+if (cpu_usage > 100) cpu_usage = 100; // Cap at 100%
+
+// Format stats string
+char stats_text[50];
+snprintf(stats_text, sizeof(stats_text), "FPS: %d CPU: %d%%", fps, cpu_usage);
+
+// Render text
+SDL_Surface *stats_surface = TTF_RenderText_Solid(font, stats_text, color);
+if (stats_surface) {
+    SDL_Rect stats_rect = {stats_x, stats_y, 0, 0};
+    SDL_BlitSurface(stats_surface, NULL, screen, &stats_rect);
+    SDL_FreeSurface(stats_surface);
+    printf("renderPerformanceStats: Player %d, %s at (%d,%d)\n", player_num, stats_text, stats_x, stats_y);
+} else {
+    printf("renderPerformanceStats: Failed to render stats for player %d: %s\n", player_num, TTF_GetError());
+}
+
 }
