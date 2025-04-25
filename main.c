@@ -4,60 +4,69 @@
 #include <SDL/SDL_ttf.h>
 #include <SDL/SDL_image.h>
 #include <string.h>
+#include <stdlib.h>
+#include <time.h>
 
 #define MAX_HISTORY 10
-#define SCROLL_SPEED 10 // Slower speed for smoother movement
+#define SCROLL_SPEED 10
+#define INITIAL_LIVES 3
+#define INITIAL_SCORE 100
 
 int main() {
+    srand(time(NULL));
     Mix_Music *music = NULL;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
-        printf("Erreur SDL_Init: %s\n", SDL_GetError());
+        printf("SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
     SDL_Surface *screen = SDL_SetVideoMode(1920, 1080, 32, SDL_SWSURFACE);
     if (!screen) {
-        printf("Erreur SDL_SetVideoMode: %s\n", SDL_GetError());
+        printf("SDL_SetVideoMode failed: %s\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
     SDL_WM_SetCaption("Menu", NULL);
 
     if (TTF_Init() == -1) {
-        printf("Erreur TTF_Init: %s\n", TTF_GetError());
+        printf("TTF_Init failed: %s\n", TTF_GetError());
         SDL_Quit();
         return 1;
     }
     
     TTF_Font *font = TTF_OpenFont("FredokaOne-Regular.ttf", 50);  
     if (!font) {
-        printf("Erreur chargement police: %s\n", TTF_GetError());
+        printf("Failed to load font: %s\n", TTF_GetError());
         TTF_Quit();
         SDL_Quit();
         return 1;
     }
     
     SDL_Color textColor = {0, 0, 0};
-    SDL_Color color = {255, 255, 0}; // Yellow for visibility
+    SDL_Color color = {255, 255, 0};
     Background backgrounds[3];
+    printf("main: Loading menu backgrounds\n");
     load_backgrounds(backgrounds);
 
-    Background player1Background, player2Background, sharedBackground;
-    if (!initBackground(&player1Background, "ghassen.png", 0) ||
-        !initBackground(&player2Background, "ghassen.png", 0) ||
-        !initBackground(&sharedBackground, "ghassen.png", 0)) {
-        printf("Failed to initialize game backgrounds\n");
-        TTF_CloseFont(font);
-        TTF_Quit();
-        SDL_Quit();
-        return 1;
-    }
+    // Initialize players explicitly
+    Player player1 = {0};
+    Player player2 = {0};
+    printf("main: Initializing player 1, bg.background=%p\n", player1.bg.background);
+    initPlayer(&player1, "ghassen.png", 0, INITIAL_LIVES, INITIAL_SCORE, 1);
+    printf("main: Initializing player 2, bg.background=%p\n", player2.bg.background);
+    initPlayer(&player2, "ghassen.png", 0, INITIAL_LIVES, INITIAL_SCORE, 2);
+
+    Obstacle obstacles[MAX_OBSTACLES];
+    printf("main: Initializing obstacles\n");
+    initObstacles(obstacles, MAX_OBSTACLES);
+    printf("main: Obstacles initialized\n");
 
     Button buttons[7];
     int buttons_visible[7] = {1, 1, 1, 1, 1, 0, 0};
+    printf("main: Loading buttons\n");
     load_buttons(buttons);
 
     if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
-        printf("Erreur Mix_OpenAudio: %s\n", Mix_GetError());
+        printf("Mix_OpenAudio failed: %s\n", Mix_GetError());
         TTF_CloseFont(font);
         TTF_Quit();
         SDL_Quit();
@@ -66,7 +75,7 @@ int main() {
 
     music = Mix_LoadMUS("music.mp3");
     if (!music) {
-        printf("Erreur chargement musique: %s\n", Mix_GetError());
+        printf("Failed to load music: %s\n", Mix_GetError());
         Mix_CloseAudio();
         TTF_CloseFont(font);
         TTF_Quit();
@@ -75,7 +84,7 @@ int main() {
     }
 
     if (Mix_PlayMusic(music, -1) == -1) {
-        printf("Erreur Mix_PlayMusic: %s\n", Mix_GetError());
+        printf("Mix_PlayMusic failed: %s\n", Mix_GetError());
         Mix_FreeMusic(music);
         Mix_CloseAudio();
         TTF_CloseFont(font);
@@ -90,7 +99,8 @@ int main() {
     int running = 1;
     SDL_Event event;
     Uint32 startTime = SDL_GetTicks();
-    int split_screen = 0; // Start with single-screen
+    int split_screen = 0;
+    int active_player = 1;
     int show_guide = 0;
     int show_guide_prompt = 0;
     char guide_response[2] = "";
@@ -99,6 +109,9 @@ int main() {
     int current_game_background2 = 0;
     int player1_finished = 0;
     int player2_finished = 0;
+    int num_obstacles = 3;
+    int obstacle_spawn_timer = 0;
+    const int spawn_interval = 60;
 
     while (running) {
         while (SDL_PollEvent(&event)) {
@@ -124,16 +137,23 @@ int main() {
                             for (int j = 0; j < 7; j++) buttons_visible[j] = 0;
                             printf("Entering gameplay mode: current_background=%d\n", current_background);
                             display_successive_backgrounds(screen);
-                            // Reinitialize backgrounds
-                            if (player1Background.background) SDL_FreeSurface(player1Background.background);
-                            if (player2Background.background) SDL_FreeSurface(player2Background.background);
-                            if (sharedBackground.background) SDL_FreeSurface(sharedBackground.background);
-                            if (!initBackground(&player1Background, game_backgrounds[0], split_screen) ||
-                                !initBackground(&player2Background, game_backgrounds[0], split_screen) ||
-                                !initBackground(&sharedBackground, game_backgrounds[0], 0)) {
-                                printf("Failed to reinitialize backgrounds after play: %s\n", game_backgrounds[0]);
-                                running = 0;
+                            if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
+                            if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
+                            if (!initBackground(&player1.bg, game_backgrounds[0], split_screen)) {
+                                printf("Failed to reinitialize player 1 background: %s, using fallback\n", game_backgrounds[0]);
+                                initBackground(&player1.bg, "image/m2.png", split_screen);
                             }
+                            if (!initBackground(&player2.bg, game_backgrounds[0], split_screen)) {
+                                printf("Failed to reinitialize player 2 background: %s, using fallback\n", game_backgrounds[0]);
+                                initBackground(&player2.bg, "image/m2.png", split_screen);
+                            }
+                            player1.lives = INITIAL_LIVES;
+                            player2.lives = INITIAL_LIVES;
+                            player1.score = INITIAL_SCORE;
+                            player2.score = INITIAL_SCORE;
+                            initObstacles(obstacles, MAX_OBSTACLES);
+                            num_obstacles = 3;
+                            obstacle_spawn_timer = 0;
                         }
                         else if (i == 1 || i == 2) {
                             if (history_index < MAX_HISTORY - 1) {
@@ -197,50 +217,50 @@ int main() {
                 else if (!show_guide_prompt && !show_guide) {
                     switch(event.key.keysym.sym) {
                         case SDLK_RIGHT:
-                            if (split_screen && !player2_finished) {
-                                player2Background.direction = 0; // Right
+                            if (!player2_finished) {
+                                player2.bg.direction = 0;
                                 printf("Player 2 direction: Right\n");
                             }
                             break;
                         case SDLK_LEFT:
-                            if (split_screen && !player2_finished) {
-                                player2Background.direction = 1; // Left
+                            if (!player2_finished) {
+                                player2.bg.direction = 1;
                                 printf("Player 2 direction: Left\n");
                             }
                             break;
                         case SDLK_UP:
-                            if (split_screen && !player2_finished) {
-                                player2Background.direction = 2; // Up
+                            if (!player2_finished) {
+                                player2.bg.direction = 2;
                                 printf("Player 2 direction: Up\n");
                             }
                             break;
                         case SDLK_DOWN:
-                            if (split_screen && !player2_finished) {
-                                player2Background.direction = 3; // Down
+                            if (!player2_finished) {
+                                player2.bg.direction = 3;
                                 printf("Player 2 direction: Down\n");
                             }
                             break;
                         case SDLK_d:
                             if (!player1_finished) {
-                                player1Background.direction = 0; // Right
+                                player1.bg.direction = 0;
                                 printf("Player 1 direction: Right\n");
                             }
                             break;
                         case SDLK_q:
                             if (!player1_finished) {
-                                player1Background.direction = 1; // Left
+                                player1.bg.direction = 1;
                                 printf("Player 1 direction: Left\n");
                             }
                             break;
                         case SDLK_z:
                             if (!player1_finished) {
-                                player1Background.direction = 2; // Up
+                                player1.bg.direction = 2;
                                 printf("Player 1 direction: Up\n");
                             }
                             break;
                         case SDLK_s:
                             if (!player1_finished) {
-                                player1Background.direction = 3; // Down
+                                player1.bg.direction = 3;
                                 printf("Player 1 direction: Down\n");
                             }
                             break;
@@ -251,31 +271,41 @@ int main() {
                         case SDLK_o:
                             split_screen = !split_screen;
                             if (split_screen) {
-                                // Update camera heights for split-screen
-                                if (player1Background.background) SDL_FreeSurface(player1Background.background);
-                                if (player2Background.background) SDL_FreeSurface(player2Background.background);
-                                if (!initBackground(&player1Background, game_backgrounds[current_game_background1], 1) ||
-                                    !initBackground(&player2Background, game_backgrounds[current_game_background2], 1)) {
-                                    printf("Failed to init split-screen backgrounds: bg1=%s, bg2=%s\n",
-                                           game_backgrounds[current_game_background1], game_backgrounds[current_game_background2]);
-                                    running = 0;
+                                if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
+                                if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
+                                if (!initBackground(&player1.bg, game_backgrounds[current_game_background1], 1)) {
+                                    printf("Failed to init split-screen background for player 1: %s, using fallback\n",
+                                           game_backgrounds[current_game_background1]);
+                                    initBackground(&player1.bg, "image/m2.png", 1);
+                                }
+                                if (!initBackground(&player2.bg, game_backgrounds[current_game_background2], 1)) {
+                                    printf("Failed to init split-screen background for player 2: %s, using fallback\n",
+                                           game_backgrounds[current_game_background2]);
+                                    initBackground(&player2.bg, "image/m2.png", 1);
                                 }
                                 printf("Split-screen enabled (top-bottom)\n");
                             } else {
-                                // Restore single-screen
-                                if (player1Background.background) SDL_FreeSurface(player1Background.background);
-                                if (player2Background.background) SDL_FreeSurface(player2Background.background);
-                                if (sharedBackground.background) SDL_FreeSurface(sharedBackground.background);
-                                if (!initBackground(&player1Background, game_backgrounds[current_game_background1], 0) ||
-                                    !initBackground(&player2Background, game_backgrounds[current_game_background2], 0) ||
-                                    !initBackground(&sharedBackground, game_backgrounds[current_game_background1], 0)) {
-                                    printf("Failed to init single-screen backgrounds: bg1=%s, bg2=%s\n",
-                                           game_backgrounds[current_game_background1], game_backgrounds[current_game_background2]);
-                                    running = 0;
+                                if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
+                                if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
+                                if (!initBackground(&player1.bg, game_backgrounds[current_game_background1], 0)) {
+                                    printf("Failed to init single-screen background for player 1: %s, using fallback\n",
+                                           game_backgrounds[current_game_background1]);
+                                    initBackground(&player1.bg, "image/m2.png", 0);
                                 }
-                                sharedBackground.camera_pos.x = player1Background.camera_pos.x;
-                                sharedBackground.camera_pos.y = player1Background.camera_pos.y;
-                                printf("Split-screen disabled, using player 1's background\n");
+                                if (!initBackground(&player2.bg, game_backgrounds[current_game_background2], 0)) {
+                                    printf("Failed to init single-screen background for player 2: %s, using fallback\n",
+                                           game_backgrounds[current_game_background2]);
+                                    initBackground(&player2.bg, "image/m2.png", 0);
+                                }
+                                printf("Split-screen disabled\n");
+                            }
+                            player1.bounding_box.y = split_screen ? 100 : 400;
+                            player2.bounding_box.y = split_screen ? 640 : 400;
+                            break;
+                        case SDLK_TAB:
+                            if (!split_screen) {
+                                active_player = (active_player == 1) ? 2 : 1;
+                                printf("Switched to player %d\n", active_player);
                             }
                             break;
                     }
@@ -291,16 +321,14 @@ int main() {
                     case SDLK_LEFT:
                     case SDLK_UP:
                     case SDLK_DOWN:
-                        if (split_screen) {
-                            player2Background.direction = -1;
-                            printf("Player 2 direction: None\n");
-                        }
+                        player2.bg.direction = -1;
+                        printf("Player 2 direction: None\n");
                         break;
                     case SDLK_d:
                     case SDLK_q:
                     case SDLK_z:
                     case SDLK_s:
-                        player1Background.direction = -1;
+                        player1.bg.direction = -1;
                         printf("Player 1 direction: None\n");
                         break;
                 }
@@ -310,99 +338,60 @@ int main() {
         SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
 
         if (current_background == 1) {
-            printf("Game loop: split_screen=%d, player1_finished=%d, player2_finished=%d, show_guide_prompt=%d, show_guide=%d\n",
-                   split_screen, player1_finished, player2_finished, show_guide_prompt, show_guide);
-            printf("Player1: bg_index=%d (%s), direction=%d, camera=(%d,%d,%d,%d)\n",
-                   current_game_background1, game_backgrounds[current_game_background1], player1Background.direction,
-                   player1Background.camera_pos.x, player1Background.camera_pos.y,
-                   player1Background.camera_pos.w, player1Background.camera_pos.h);
-            printf("Player2: bg_index=%d (%s), direction=%d, camera=(%d,%d,%d,%d)\n",
-                   current_game_background2, game_backgrounds[current_game_background2], player2Background.direction,
-                   player2Background.camera_pos.x, player2Background.camera_pos.y,
-                   player2Background.camera_pos.w, player2Background.camera_pos.h);
+            printf("Game loop: split_screen=%d, active_player=%d, player1_finished=%d, player2_finished=%d, num_obstacles=%d\n",
+                   split_screen, active_player, player1_finished, player2_finished, num_obstacles);
 
-            // Handle continuous movement
-            int hit_boundary1 = 0, hit_boundary2 = 0;
+            int level = (current_game_background1 == 1 || current_game_background2 == 1) ? 2 : 1;
+            num_obstacles = (level == 1) ? 3 : 6;
 
-            // Player 1 movement (always active, affects sharedBackground in single-screen)
-            if (!player1_finished && player1Background.direction != -1 && !show_guide_prompt && !show_guide) {
+            if (!show_guide_prompt && !show_guide) {
+                obstacle_spawn_timer++;
+                if (obstacle_spawn_timer >= spawn_interval) {
+                    updateObstacles(obstacles, num_obstacles, level, SCREEN_WIDTH, split_screen ? 540 : SCREEN_HEIGHT);
+                    obstacle_spawn_timer = 0;
+                }
+            }
+
+            int hit_boundary1 = 0;
+            if (!player1_finished && player1.bg.direction != -1 && !show_guide_prompt && !show_guide) {
                 printf("Processing Player 1 movement\n");
-                switch(player1Background.direction) {
-                    case 0: hit_boundary1 = scrolling(&player1Background, SCROLL_SPEED, 0); break; // Right
-                    case 1: hit_boundary1 = scrolling(&player1Background, -SCROLL_SPEED, 0); break; // Left
-                    case 2: hit_boundary1 = scrolling(&player1Background, 0, -SCROLL_SPEED); break; // Up
-                    case 3: hit_boundary1 = scrolling(&player1Background, 0, SCROLL_SPEED); break; // Down
-                }
-                // Sync sharedBackground in single-screen mode
-                if (!split_screen) {
-                    sharedBackground.camera_pos.x = player1Background.camera_pos.x;
-                    sharedBackground.camera_pos.y = player1Background.camera_pos.y;
+                switch(player1.bg.direction) {
+                    case 0: hit_boundary1 = scrolling(&player1.bg, SCROLL_SPEED, 0); break;
+                    case 1: hit_boundary1 = scrolling(&player1.bg, -SCROLL_SPEED, 0); break;
+                    case 2: hit_boundary1 = scrolling(&player1.bg, 0, -SCROLL_SPEED); break;
+                    case 3: hit_boundary1 = scrolling(&player1.bg, 0, SCROLL_SPEED); break;
                 }
             }
 
-            // Player 2 movement (only in split-screen)
-            if (split_screen && !player2_finished && player2Background.direction != -1 && !show_guide_prompt && !show_guide) {
+            int hit_boundary2 = 0;
+            if (!player2_finished && player2.bg.direction != -1 && !show_guide_prompt && !show_guide) {
                 printf("Processing Player 2 movement\n");
-                switch(player2Background.direction) {
-                    case 0: hit_boundary2 = scrolling(&player2Background, SCROLL_SPEED, 0); break; // Right
-                    case 1: hit_boundary2 = scrolling(&player2Background, -SCROLL_SPEED, 0); break; // Left
-                    case 2: hit_boundary2 = scrolling(&player2Background, 0, -SCROLL_SPEED); break; // Up
-                    case 3: hit_boundary2 = scrolling(&player2Background, 0, SCROLL_SPEED); break; // Down
+                switch(player2.bg.direction) {
+                    case 0: hit_boundary2 = scrolling(&player2.bg, SCROLL_SPEED, 0); break;
+                    case 1: hit_boundary2 = scrolling(&player2.bg, -SCROLL_SPEED, 0); break;
+                    case 2: hit_boundary2 = scrolling(&player2.bg, 0, -SCROLL_SPEED); break;
+                    case 3: hit_boundary2 = scrolling(&player2.bg, 0, SCROLL_SPEED); break;
                 }
             }
 
-            // Handle player 1 boundary hit
-            if (hit_boundary1 && !player1_finished) {
-                current_game_background1++;
-                printf("Player 1 hit boundary, new background index: %d (%s)\n", 
-                       current_game_background1, game_backgrounds[current_game_background1]);
-                if (current_game_background1 < 3) {
-                    if (player1Background.background) SDL_FreeSurface(player1Background.background);
-                    if (!initBackground(&player1Background, game_backgrounds[current_game_background1], split_screen)) {
-                        printf("Failed to load background %s for player 1, using fallback\n", game_backgrounds[current_game_background1]);
-                        if (!initBackground(&player1Background, "ghassen.png", split_screen)) {
-                            printf("Fallback failed for player 1\n");
-                            running = 0;
-                        }
+            for (int i = 0; i < num_obstacles; i++) {
+                if (obstacles[i].active) {
+                    if (checkCollision(player1.bounding_box, obstacles[i].position)) {
+                        player1.lives--;
+                        player1.score -= 10;
+                        obstacles[i].active = 0;
+                        printf("Player 1 hit obstacle, lives=%d, score=%d\n", player1.lives, player1.score);
                     }
-                    if (!split_screen) {
-                        if (sharedBackground.background) SDL_FreeSurface(sharedBackground.background);
-                        if (!initBackground(&sharedBackground, game_backgrounds[current_game_background1], 0)) {
-                            printf("Failed to load shared background %s, using fallback\n", game_backgrounds[current_game_background1]);
-                            if (!initBackground(&sharedBackground, "ghassen.png", 0)) {
-                                printf("Fallback failed for shared background\n");
-                                running = 0;
-                            }
-                        }
+                    if (checkCollision(player2.bounding_box, obstacles[i].position)) {
+                        player2.lives--;
+                        player2.score -= 10;
+                        obstacles[i].active = 0;
+                        printf("Player 2 hit obstacle, lives=%d, score=%d\n", player2.lives, player2.score);
                     }
-                } else {
-                    player1_finished = 1;
-                    printf("Player 1 finished (safia.png)\n");
                 }
             }
 
-            // Handle player 2 boundary hit (only in split-screen)
-            if (split_screen && hit_boundary2 && !player2_finished) {
-                current_game_background2++;
-                printf("Player 2 hit boundary, new background index: %d (%s)\n", 
-                       current_game_background2, game_backgrounds[current_game_background2]);
-                if (current_game_background2 < 3) {
-                    if (player2Background.background) SDL_FreeSurface(player2Background.background);
-                    if (!initBackground(&player2Background, game_backgrounds[current_game_background2], 1)) {
-                        printf("Failed to load background %s for player 2, using fallback\n", game_backgrounds[current_game_background2]);
-                        if (!initBackground(&player2Background, "ghassen.png", 1)) {
-                            printf("Fallback failed for player 2\n");
-                            running = 0;
-                        }
-                    }
-                } else {
-                    player2_finished = 1;
-                    printf("Player 2 finished (safia.png)\n");
-                }
-            }
-
-            // Check if both players have finished (in single-screen, only player 1 matters)
-            if ((split_screen && player1_finished && player2_finished) || (!split_screen && player1_finished)) {
+            if (player1.lives <= 0 || player2.lives <= 0) {
                 current_background = 0;
                 for (int j = 0; j < 7; j++) buttons_visible[j] = 0;
                 for (int j = 0; j < 5; j++) buttons_visible[j] = 1;
@@ -411,23 +400,107 @@ int main() {
                 current_game_background2 = 0;
                 player1_finished = 0;
                 player2_finished = 0;
-                if (player1Background.background) SDL_FreeSurface(player1Background.background);
-                if (player2Background.background) SDL_FreeSurface(player2Background.background);
-                if (sharedBackground.background) SDL_FreeSurface(sharedBackground.background);
-                if (!initBackground(&player1Background, game_backgrounds[0], 0) ||
-                    !initBackground(&player2Background, game_backgrounds[0], 0) ||
-                    !initBackground(&sharedBackground, game_backgrounds[0], 0)) {
-                    printf("Failed to reset backgrounds\n");
-                    running = 0;
+                if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
+                if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
+                if (!initBackground(&player1.bg, game_backgrounds[0], 0)) {
+                    printf("Failed to reset player 1 background: %s, using fallback\n", game_backgrounds[0]);
+                    initBackground(&player1.bg, "image/m2.png", 0);
                 }
-                split_screen = 0; // Return to single-screen
+                if (!initBackground(&player2.bg, game_backgrounds[0], 0)) {
+                    printf("Failed to reset player 2 background: %s, using fallback\n", game_backgrounds[0]);
+                    initBackground(&player2.bg, "image/m2.png", 0);
+                }
+                player1.lives = INITIAL_LIVES;
+                player2.lives = INITIAL_LIVES;
+                player1.score = INITIAL_SCORE;
+                player2.score = INITIAL_SCORE;
+                split_screen = 0;
+                active_player = 1;
+                initObstacles(obstacles, MAX_OBSTACLES);
+                printf("Player out of lives, returning to main menu\n");
+            }
+
+            if (hit_boundary1 && !player1_finished) {
+                current_game_background1++;
+                printf("Player 1 hit boundary, new background index: %d (%s)\n",
+                       current_game_background1, game_backgrounds[current_game_background1]);
+                if (current_game_background1 < 3) {
+                    if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
+                    if (!initBackground(&player1.bg, game_backgrounds[current_game_background1], split_screen)) {
+                        printf("Failed to load background %s for player 1, using fallback\n",
+                               game_backgrounds[current_game_background1]);
+                        initBackground(&player1.bg, "image/m2.png", split_screen);
+                    }
+                    initObstacles(obstacles, MAX_OBSTACLES);
+                    obstacle_spawn_timer = 0;
+                } else {
+                    player1_finished = 1;
+                    printf("Player 1 finished (safia.png)\n");
+                }
+            }
+
+            if (hit_boundary2 && !player2_finished) {
+                current_game_background2++;
+                printf("Player 2 hit boundary, new background index: %d (%s)\n",
+                       current_game_background2, game_backgrounds[current_game_background2]);
+                if (current_game_background2 < 3) {
+                    if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
+                    if (!initBackground(&player2.bg, game_backgrounds[current_game_background2], split_screen)) {
+                        printf("Failed to load background %s for player 2, using fallback\n",
+                               game_backgrounds[current_game_background2]);
+                        initBackground(&player2.bg, "image/m2.png", split_screen);
+                    }
+                    initObstacles(obstacles, MAX_OBSTACLES);
+                    obstacle_spawn_timer = 0;
+                } else {
+                    player2_finished = 1;
+                    printf("Player 2 finished (safia.png)\n");
+                }
+            }
+
+            if (player1_finished && player2_finished) {
+                current_background = 0;
+                for (int j = 0; j < 7; j++) buttons_visible[j] = 0;
+                for (int j = 0; j < 5; j++) buttons_visible[j] = 1;
+                history_index = -1;
+                current_game_background1 = 0;
+                current_game_background2 = 0;
+                player1_finished = 0;
+                player2_finished = 0;
+                if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
+                if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
+                if (!initBackground(&player1.bg, game_backgrounds[0], 0)) {
+                    printf("Failed to reset player 1 background: %s, using fallback\n", game_backgrounds[0]);
+                    initBackground(&player1.bg, "image/m2.png", 0);
+                }
+                if (!initBackground(&player2.bg, game_backgrounds[0], 0)) {
+                    printf("Failed to reset player 2 background: %s, using fallback\n", game_backgrounds[0]);
+                    initBackground(&player2.bg, "image/m2.png", 0);
+                }
+                player1.lives = INITIAL_LIVES;
+                player2.lives = INITIAL_LIVES;
+                player1.score = INITIAL_SCORE;
+                player2.score = INITIAL_SCORE;
+                split_screen = 0;
+                active_player = 1;
+                initObstacles(obstacles, MAX_OBSTACLES);
                 printf("Game finished, returning to main menu\n");
             }
 
             if (split_screen) {
-                splitScreen(screen, &player1Background, &player2Background, font, color, startTime);
+                splitScreen(screen, &player1, &player2, obstacles, num_obstacles, font, color, startTime);
             } else {
-                renderBackground(screen, &sharedBackground, font, color, startTime, split_screen);
+                Player *active_p = (active_player == 1) ? &player1 : &player2;
+                int player_num = (active_player == 1) ? 1 : 2;
+                renderBackground(screen, active_p, obstacles, num_obstacles, font, color, startTime, split_screen, player_num);
+                char player_text[20];
+                snprintf(player_text, sizeof(player_text), "Player %d", active_player);
+                SDL_Surface *player_surface = TTF_RenderText_Solid(font, player_text, color);
+                if (player_surface) {
+                    SDL_Rect player_rect = {1700, 20, 0, 0};
+                    SDL_BlitSurface(player_surface, NULL, screen, &player_rect);
+                    SDL_FreeSurface(player_surface);
+                }
             }
         } else {
             render_menu(screen, backgrounds[current_background], buttons, buttons_visible, current_background, font, textColor);
@@ -458,9 +531,11 @@ int main() {
         if (buttons[i].button_inactive) SDL_FreeSurface(buttons[i].button_inactive);
         if (buttons[i].button_active) SDL_FreeSurface(buttons[i].button_active);
     }
-    if (player1Background.background) SDL_FreeSurface(player1Background.background);
-    if (player2Background.background) SDL_FreeSurface(player2Background.background);
-    if (sharedBackground.background) SDL_FreeSurface(sharedBackground.background);
+    for (int i = 0; i < MAX_OBSTACLES; i++) {
+        if (obstacles[i].image) SDL_FreeSurface(obstacles[i].image);
+    }
+    if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
+    if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
     Mix_FreeMusic(music);
     Mix_CloseAudio();
     TTF_CloseFont(font);
