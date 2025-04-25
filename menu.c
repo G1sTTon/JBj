@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 void load_backgrounds(Background backgrounds[]) {
     const char *bg_files[] = {"image/m2.png", "image/m1.png", "image/m3.png"};
@@ -218,12 +219,21 @@ void render_time(SDL_Surface *screen, TTF_Font *font, SDL_Color color, Uint32 st
         printf("render_time: NULL font\n");
         return;
     }
+
+    // Calculate elapsed time in milliseconds
     Uint32 currentTime = SDL_GetTicks();
-    Uint32 seconds = (currentTime - startTime) / 1000;
-    Uint32 minutes = seconds / 60;
-    seconds %= 60;
+    Uint32 elapsedTime = currentTime - startTime;
+
+    // Extract minutes, seconds, and milliseconds
+    Uint32 minutes = elapsedTime / (1000 * 60);
+    Uint32 seconds = (elapsedTime / 1000) % 60;
+    Uint32 milliseconds = elapsedTime % 1000;
+
+    // Format time string as MM:SS:MMM
     char timeStr[20];
-    snprintf(timeStr, sizeof(timeStr), "Time: %02d:%02d", minutes, seconds);
+    snprintf(timeStr, sizeof(timeStr), "Time: %02d:%02d:%03d", minutes, seconds, milliseconds);
+
+    // Render the time text
     SDL_Surface *timeSurface = TTF_RenderText_Solid(font, timeStr, color);
     if (timeSurface) {
         SDL_Rect timeRect = {20, player == 1 ? 20 : SCREEN_HEIGHT / 2 + 20, 0, 0};
@@ -233,7 +243,28 @@ void render_time(SDL_Surface *screen, TTF_Font *font, SDL_Color color, Uint32 st
     } else {
         printf("render_time: Failed to render time: %s\n", TTF_GetError());
     }
+
+    // Get current date
+    time_t rawtime;
+    struct tm *timeinfo;
+    char dateStr[20];
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+    strftime(dateStr, sizeof(dateStr), "Date: %Y-%m-%d", timeinfo);
+
+    // Render the date text
+    SDL_Surface *dateSurface = TTF_RenderText_Solid(font, dateStr, color);
+    if (dateSurface) {
+        // Position date at bottom-left of each player's screen
+        SDL_Rect dateRect = {20, player == 1 ? SCREEN_HEIGHT - 40 : SCREEN_HEIGHT / 2 + 500, 0, 0};
+        SDL_BlitSurface(dateSurface, NULL, screen, &dateRect);
+        SDL_FreeSurface(dateSurface);
+        printf("Rendered date for player %d: %s\n", player, dateStr);
+    } else {
+        printf("render_time: Failed to render date: %s\n", TTF_GetError());
+    }
 }
+
 
 int initBackground(Background *b, const char *path, int split_screen) {
     printf("initBackground: Starting for %s, split_screen=%d, b->background=%p\n", path, split_screen, b->background);
