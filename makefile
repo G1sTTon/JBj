@@ -1,21 +1,18 @@
 CC = gcc
-CFLAGS = -g $(shell sdl-config --cflags)
-LDFLAGS = $(shell sdl-config --libs) -lSDL_image -lSDL_mixer -lSDL_ttf
-OBJ = main.o menu.o
-EXEC = prog
+CFLAGS = -Wall -g -std=c99 `sdl-config --cflags` -Wno-switch
+LDFLAGS = `sdl-config --libs` -lSDL_ttf -lSDL_image -lSDL_mixer
 
-all: $(EXEC)
+SRC = main.c menu.c
+OBJ = $(SRC:.c=.o)
+TARGET = jeu
 
-$(EXEC): $(OBJ)
-	$(CC) $(OBJ) -o $(EXEC) $(LDFLAGS)
+all: $(TARGET)
 
-main.o: main.c menu.h
-	$(CC) -c main.c $(CFLAGS)
+$(TARGET): $(OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS)
 
-menu.o: menu.c menu.h
-	$(CC) -c menu.c $(CFLAGS)
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(EXEC)
-
-.PHONY: all clean
+	rm -f $(OBJ) $(TARGET)
