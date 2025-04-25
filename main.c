@@ -1,11 +1,11 @@
 #include <SDL/SDL.h>
-#include "menu.h"
 #include <SDL/SDL_mixer.h>
 #include <SDL/SDL_ttf.h>
 #include <SDL/SDL_image.h>
+#include <time.h>
 #include <string.h>
 #include <stdlib.h>
-#include <time.h>
+#include "menu.h"
 
 #define MAX_HISTORY 10
 #define SCROLL_SPEED 10
@@ -33,7 +33,7 @@ int main() {
         return 1;
     }
     
-    TTF_Font *font = TTF_OpenFont("FredokaOne-Regular.ttf", 50);  
+    TTF_Font *font = TTF_OpenFont("/usr/share/fonts/truetype/fredoka/FredokaOne-Regular.ttf", 50);  
     if (!font) {
         printf("Failed to load font: %s\n", TTF_GetError());
         TTF_Quit();
@@ -111,11 +111,19 @@ int main() {
     int num_obstacles = 3;
     int obstacle_spawn_timer = 0;
     const int spawn_interval = 60;
-    // New counters for background display
-    int bg_display_count1 = 0; // Tracks how many times player 1's background has been displayed
-    int bg_display_count2 = 0; // Tracks how many times player 2's background has been displayed
+    int bg_display_count1 = 0;
+    int bg_display_count2 = 0;
+
+    // Frame tracking variables
+    Uint32 last_frame_time = SDL_GetTicks();
+    Uint32 frame_count = 0;
+    Uint32 last_second = SDL_GetTicks();
+    int fps = 0;
+    Uint32 frame_time = 16; // Default to 16ms
 
     while (running) {
+        Uint32 frame_start = SDL_GetTicks(); // Start of frame
+
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 printf("Quit event received\n");
@@ -134,8 +142,8 @@ int main() {
                             current_background = 1;
                             current_game_background1 = 0;
                             current_game_background2 = 0;
-                            bg_display_count1 = 0; // Reset display count
-                            bg_display_count2 = 0; // Reset display count
+                            bg_display_count1 = 0;
+                            bg_display_count2 = 0;
                             player1_finished = 0;
                             player2_finished = 0;
                             for (int j = 0; j < 7; j++) buttons_visible[j] = 0;
@@ -306,6 +314,8 @@ int main() {
                                 printf("Switched to player %d\n", active_player);
                             }
                             break;
+                        default:
+                            break;
                     }
                 }
                 else if (show_guide && event.key.keysym.sym == SDLK_RETURN) {
@@ -393,92 +403,50 @@ int main() {
                 current_background = 0;
                 for (int j = 0; j < 7; j++) buttons_visible[j] = 0;
                 for (int j = 0; j < 5; j++) buttons_visible[j] = 1;
-                history_index = -1;
-                current_game_background1 = 0;
-                current_game_background2 = 0;
-                bg_display_count1 = 0; // Reset display count
-                bg_display_count2 = 0; // Reset display count
-                player1_finished = 0;
-                player2_finished = 0;
-                if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
-                if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
-                if (!initBackground(&player1.bg, game_backgrounds[0], 0)) {
-                    printf("Failed to reset player 1 background: %s, using fallback\n", game_backgrounds[0]);
-                    initBackground(&player1.bg, "image/m2.png", 0);
-                }
-                if (!initBackground(&player2.bg, game_backgrounds[0], 0)) {
-                    printf("Failed to reset player 2 background: %s, using fallback\n", game_backgrounds[0]);
-                    initBackground(&player2.bg, "image/m2.png", 0);
-                }
-                player1.lives = INITIAL_LIVES;
-                player2.lives = INITIAL_LIVES;
-                player1.score = INITIAL_SCORE;
-                player2.score = INITIAL_SCORE;
-                split_screen = 0;
-                active_player = 1;
-                initObstacles(obstacles, MAX_OBSTACLES);
-                printf("Player out of lives, returning to main menu\n");
+                printf("Game over: Player 1 lives=%d, Player 2 lives=%d\n", player1.lives, player2.lives);
             }
 
             if (hit_boundary1 && !player1_finished) {
                 bg_display_count1++;
-                printf("Player 1 hit boundary, display count: %d\n", bg_display_count1);
-                if (bg_display_count1 >= 2) { // Background displayed twice
+                if (bg_display_count1 < 2) {
+                    player1.bg.camera_pos.x = 0;
+                    printf("Player 1 replaying background %s, count=%d\n", game_backgrounds[current_game_background1], bg_display_count1);
+                } else {
                     current_game_background1++;
-                    bg_display_count1 = 0; // Reset display count
-                    printf("Player 1 advancing to background index: %d (%s)\n",
-                           current_game_background1, game_backgrounds[current_game_background1]);
+                    bg_display_count1 = 0;
                     if (current_game_background1 < 3) {
+                        printf("Player 1 advancing to background %s\n", game_backgrounds[current_game_background1]);
                         if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
                         if (!initBackground(&player1.bg, game_backgrounds[current_game_background1], split_screen)) {
-                            printf("Failed to load background %s for player 1, using fallback\n",
-                                   game_backgrounds[current_game_background1]);
+                            printf("Failed to init player 1 background: %s\n", game_backgrounds[current_game_background1]);
                             initBackground(&player1.bg, "image/m2.png", split_screen);
                         }
-                        player1.bg.camera_pos.x = 0; // Reset camera to start
-                        initObstacles(obstacles, MAX_OBSTACLES);
-                        obstacle_spawn_timer = 0;
                     } else {
                         player1_finished = 1;
-                        printf("Player 1 finished (safia.png)\n");
+                        printf("Player 1 finished all backgrounds\n");
                     }
-                } else {
-                    // Reset camera to replay the same background
-                    player1.bg.camera_pos.x = 0;
-                    initObstacles(obstacles, MAX_OBSTACLES);
-                    obstacle_spawn_timer = 0;
-                    printf("Player 1 replaying background %s\n", game_backgrounds[current_game_background1]);
                 }
             }
 
             if (hit_boundary2 && !player2_finished) {
                 bg_display_count2++;
-                printf("Player 2 hit boundary, display count: %d\n", bg_display_count2);
-                if (bg_display_count2 >= 2) { // Background displayed twice
+                if (bg_display_count2 < 2) {
+                    player2.bg.camera_pos.x = 0;
+                    printf("Player 2 replaying background %s, count=%d\n", game_backgrounds[current_game_background2], bg_display_count2);
+                } else {
                     current_game_background2++;
-                    bg_display_count2 = 0; // Reset display count
-                    printf("Player 2 advancing to background index: %d (%s)\n",
-                           current_game_background2, game_backgrounds[current_game_background2]);
+                    bg_display_count2 = 0;
                     if (current_game_background2 < 3) {
+                        printf("Player 2 advancing to background %s\n", game_backgrounds[current_game_background2]);
                         if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
                         if (!initBackground(&player2.bg, game_backgrounds[current_game_background2], split_screen)) {
-                            printf("Failed to load background %s for player 2, using fallback\n",
-                                   game_backgrounds[current_game_background2]);
+                            printf("Failed to init player 2 background: %s\n", game_backgrounds[current_game_background2]);
                             initBackground(&player2.bg, "image/m2.png", split_screen);
                         }
-                        player2.bg.camera_pos.x = 0; // Reset camera to start
-                        initObstacles(obstacles, MAX_OBSTACLES);
-                        obstacle_spawn_timer = 0;
                     } else {
                         player2_finished = 1;
-                        printf("Player 2 finished (safia.png)\n");
+                        printf("Player 2 finished all backgrounds\n");
                     }
-                } else {
-                    // Reset camera to replay the same background
-                    player2.bg.camera_pos.x = 0;
-                    initObstacles(obstacles, MAX_OBSTACLES);
-                    obstacle_spawn_timer = 0;
-                    printf("Player 2 replaying background %s\n", game_backgrounds[current_game_background2]);
                 }
             }
 
@@ -486,88 +454,52 @@ int main() {
                 current_background = 0;
                 for (int j = 0; j < 7; j++) buttons_visible[j] = 0;
                 for (int j = 0; j < 5; j++) buttons_visible[j] = 1;
-                history_index = -1;
-                current_game_background1 = 0;
-                current_game_background2 = 0;
-                bg_display_count1 = 0; // Reset display count
-                bg_display_count2 = 0; // Reset display count
-                player1_finished = 0;
-                player2_finished = 0;
-                if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
-                if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
-                if (!initBackground(&player1.bg, game_backgrounds[0], 0)) {
-                    printf("Failed to reset player 1 background: %s, using fallback\n", game_backgrounds[0]);
-                    initBackground(&player1.bg, "image/m2.png", 0);
-                }
-                if (!initBackground(&player2.bg, game_backgrounds[0], 0)) {
-                    printf("Failed to reset player 2 background: %s, using fallback\n", game_backgrounds[0]);
-                    initBackground(&player2.bg, "image/m2.png", 0);
-                }
-                player1.lives = INITIAL_LIVES;
-                player2.lives = INITIAL_LIVES;
-                player1.score = INITIAL_SCORE;
-                player2.score = INITIAL_SCORE;
-                split_screen = 0;
-                active_player = 1;
-                initObstacles(obstacles, MAX_OBSTACLES);
-                printf("Game finished, returning to main menu\n");
+                printf("Both players finished, returning to menu\n");
             }
 
-            if (split_screen) {
-                splitScreen(screen, &player1, &player2, obstacles, num_obstacles, font, color, startTime);
-            } else {
-                Player *active_p = (active_player == 1) ? &player1 : &player2;
-                int player_num = (active_player == 1) ? 1 : 2;
-                renderBackground(screen, active_p, obstacles, num_obstacles, font, color, startTime, split_screen, player_num);
-                char player_text[20];
-                snprintf(player_text, sizeof(player_text), "Player %d", active_player);
-                SDL_Surface *player_surface = TTF_RenderText_Solid(font, player_text, color);
-                if (player_surface) {
-                    SDL_Rect player_rect = {1700, 20, 0, 0};
-                    SDL_BlitSurface(player_surface, NULL, screen, &player_rect);
-                    SDL_FreeSurface(player_surface);
+            if (show_guide_prompt) {
+                SDL_Color white = {255, 255, 255};
+                prompt_guide(screen, font, white, guide_response);
+                if (strlen(guide_response) > 0) {
+                    if (guide_response[0] == 'y' || guide_response[0] == 'Y') {
+                        show_guide = 1;
+                    }
+                    show_guide_prompt = 0;
+                    guide_response[0] = '\0';
                 }
+            } else if (show_guide) {
+                display_guide(screen, font);
+            } else if (split_screen) {
+                splitScreen(screen, &player1, &player2, obstacles, num_obstacles, font, color, startTime, frame_time, fps);
+            } else {
+                Player *active = (active_player == 1) ? &player1 : &player2;
+                renderBackground(screen, active, obstacles, num_obstacles, font, color, startTime, split_screen, active_player, frame_time, fps);
             }
         } else {
             render_menu(screen, backgrounds[current_background], buttons, buttons_visible, current_background, font, textColor);
         }
 
-        if (show_guide_prompt) {
-            printf("Showing guide prompt\n");
-            prompt_guide(screen, font, color, guide_response);
-            show_guide_prompt = 0;
-            printf("Guide response: %s\n", guide_response);
-            if (guide_response[0] == 'y' || guide_response[0] == 'Y') {
-                show_guide = 1;
-            }
-        }
-        else if (show_guide) {
-            printf("Displaying guide\n");
-            display_guide(screen, font);
-        }
-
         SDL_Flip(screen);
-        SDL_Delay(16);
+
+        // Update frame counter
+        frame_count++;
+        Uint32 current_time = SDL_GetTicks();
+        if (current_time - last_second >= 1000) {
+            fps = frame_count;
+            frame_count = 0;
+            last_second = current_time;
+            printf("FPS: %d\n", fps);
+        }
+        frame_time = current_time - frame_start;
+        if (frame_time < 16) {
+            SDL_Delay(16 - frame_time); // Cap at ~60 FPS
+        }
     }
 
-    for (int i = 0; i < 3; i++) {
-        if (backgrounds[i].background) SDL_FreeSurface(backgrounds[i].background);
-    }
-    for (int i = 0; i < 7; i++) {
-        if (buttons[i].button_inactive) SDL_FreeSurface(buttons[i].button_inactive);
-        if (buttons[i].button_active) SDL_FreeSurface(buttons[i].button_active);
-    }
-    for (int i = 0; i < MAX_OBSTACLES; i++) {
-        if (obstacles[i].image) SDL_FreeSurface(obstacles[i].image);
-    }
-    if (player1.bg.background) SDL_FreeSurface(player1.bg.background);
-    if (player2.bg.background) SDL_FreeSurface(player2.bg.background);
     Mix_FreeMusic(music);
     Mix_CloseAudio();
     TTF_CloseFont(font);
     TTF_Quit();
     SDL_Quit();
-
-    printf("Program exited\n");
     return 0;
 }
